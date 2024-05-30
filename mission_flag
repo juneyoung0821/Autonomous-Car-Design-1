@@ -1,0 +1,182 @@
+#define NO_MISSION 4
+
+#define ledPin 13  //LED 디지털 핀 13번에 연결
+#define LINE_DETECT_WHITE  1
+
+bool mission_flag[NO_MISSION] = {1,1,1,1};
+
+#include <Wire.h>
+#include <LSM303.h>
+
+#define THRESHOLD_ANGLE 10
+
+#define ENA 10
+#define IN1 28
+#define IN2 29
+#define IN3 30
+#define IN4 31
+#define ENB 11
+
+#include <NewPing.h>
+
+#define SONAR_NUM 3 
+#define MAX_DISTANCE 150
+float UltrasonicSensorData[SONAR_NUM];
+
+NewPing sonar[SONAR_NUM] =
+{
+  NewPing(14,15,MAX_DISTANCE),
+  NewPing(16,17,MAX_DISTANCE),
+  NewPing(18,19,MAX_DISTANCE),
+};
+
+void read_ultransonic_sensor(void)
+{
+  UltrasonicSensorData[0] = sonar[0].ping_cm();
+  UltrasonicSensorData[1] = sonar[1].ping_cm();
+  UltrasonicSensorData[2] = sonar[2].ping_cm();
+}
+
+LSM303 compass;
+
+float heading_angle = 0.0;
+float in_heading_angle = 17.0;
+float target_heading_angle = 90;
+float heading_angle_error = 0.0;
+
+void setup() {
+  Serial.begin(9600);
+  
+  Wire.begin();
+  compass.init();
+  compass.enableDefault();
+  
+  compass.m_min = (LSM303::vector<int16_t>){-32767, -32767, -32767};
+  compass.m_max = (LSM303::vector<int16_t>){+32767, +32767, +32767};
+}
+
+
+void motor_A_control(int direction_a, int motor_speed_a) //모터 A의 방향(direction)과 속도(speed) 제어
+{
+  if(direction_a == HIGH)
+  {
+
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+     analogWrite(ENA,motor_speed_a); //모터의 속도 제어
+    
+  }
+  else
+  {
+    digitalWrite(IN1, LOW); //모터의 방향 제어
+    digitalWrite(IN2, HIGH);
+    analogWrite(ENA,motor_speed_a);
+    
+  }
+}
+
+void motor_B_control(int direction_b, int motor_speed_b) //모터 A의 방향(direction)과 속도(speed) 제어
+{
+  if(direction_b == HIGH)
+  {
+
+     digitalWrite(IN3, LOW);
+     digitalWrite(IN4, HIGH);
+     analogWrite(ENB,motor_speed_b); //모터의 속도 제어
+    
+  }
+  else
+  {
+    digitalWrite(IN3, HIGH); //모터의 방향 제어
+    digitalWrite(IN4, LOW);
+    analogWrite(ENB,motor_speed_b);
+    
+  }
+}
+
+
+
+
+#define THRESHOLD_ANGLE1 15
+#define THRESHOLD_ANGLE2 7
+
+void imu_rotation(float target_heading_angle)
+{
+  compass.read();
+  float heading1 = compass.heading();
+  compass.read();
+  float heading2 = compass.heading();
+  float heading = (heading1 + heading2)/2;
+
+  heading = 360 - heading;
+
+  heading_angle_error = target_heading_angle - heading;
+  bool flag = 1;
+  
+  while(flag)
+  {
+
+    if(heading_angle_error > THRESHOLD_ANGLE1)
+    {
+      motor_A_control(LOW,70);
+      motor_B_control(HIGH,60);
+    }
+    else if((heading_angle_error >= THRESHOLD_ANGLE2)&&(heading_angle_error <= THRESHOLD_ANGLE1))
+    {
+      motor_A_control(LOW,40);
+      motor_B_control(HIGH,40);
+    }
+    else if((heading_angle_error > -THRESHOLD_ANGLE2)&&(heading_angle_error < -THRESHOLD_ANGLE2))
+    {
+      motor_A_control(HIGH,0);
+      motor_B_control(HIGH,0);
+    }
+    else if(heading_angle_error < -THRESHOLD_ANGLE1)
+    {
+      motor_A_control(HIGH,70);
+      motor_B_control(LOW,60);
+    }
+    else if((heading_angle_error <= -THRESHOLD_ANGLE2)&&(heading_angle_error >= -THRESHOLD_ANGLE1))
+    {
+      motor_A_control(HIGH,40);
+      motor_B_control(LOW,40);
+    }
+
+    Serial.print("Heading Angle Error : ");
+    Serial.print(heading_angle_error);
+    Serial.print(" = ");
+    Serial.print(target_heading_angle);
+    Serial.print(" - ");
+    Serial.print(heading);
+  }
+}
+
+void loop() {
+  int line_index = -10;
+  read_ultransonic_sensor();
+  mission_flag[0] = 0;
+
+  if(mission_flag[0] == 0)
+  {
+    if(UltrasonicSensorData[0] < 200)
+    {
+      mission_flag[0] = 1;
+      mission_flag[1] = 0;
+    }
+    else if((line_index == 0) && (UltrasonicSensorData[1] <= 100) && (UltrasonicSensorData[2] <= 100))
+    {
+      mission_flag[2] = 0;
+    }
+    else
+    {
+      motor_A_control(HIGH,150);
+      motor_B_control(HIGH,150);
+    }
+  }
+  else if(mission_flag[1] == 0)
+  {
+    int target_angle = 90;
+    imu_rotation(target_angle);
+    mission_flag[1]=1;
+  }
+}
